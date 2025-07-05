@@ -4,6 +4,7 @@
 
 #include "GeometryGenerator.h"
 #include <algorithm>
+#include <fstream>
 
 using namespace DirectX;
 
@@ -652,6 +653,41 @@ GeometryGenerator::MeshData GeometryGenerator::CreateQuad(float x, float y, floa
 	meshData.Indices32[3] = 0;
 	meshData.Indices32[4] = 2;
 	meshData.Indices32[5] = 3;
+
+	return meshData;
+}
+
+GeometryGenerator::MeshData GeometryGenerator::ReadFile(const std::string& srcFile)
+{
+	MeshData meshData;
+	
+	std::ifstream modelFile(srcFile.c_str());
+
+	if (!modelFile.is_open())
+		throw "File not found";
+
+	std::string ignore;
+
+	size_t vertexCount;
+	size_t triangleCount;
+
+	modelFile >> ignore >> vertexCount;
+	modelFile >> ignore >> triangleCount;
+	modelFile >> ignore >> ignore >> ignore >> ignore;
+
+	meshData.Vertices.resize(vertexCount);
+	for (int i = 0; i < vertexCount; i++)
+	{
+		modelFile >> meshData.Vertices[i].Position.x >> meshData.Vertices[i].Position.y >> meshData.Vertices[i].Position.z;
+		modelFile >> meshData.Vertices[i].Normal.x >> meshData.Vertices[i].Normal.y >> meshData.Vertices[i].Normal.z;
+	}
+
+	modelFile >> ignore >> ignore >> ignore;
+	meshData.Indices32.resize(triangleCount * 3);
+	for (int i = 0; i < triangleCount; i++)
+	{
+		modelFile >> meshData.Indices32[i * 3] >> meshData.Indices32[i * 3 + 1] >> meshData.Indices32[i * 3 + 2];
+	}
 
 	return meshData;
 }

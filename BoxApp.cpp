@@ -14,6 +14,7 @@
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 using namespace DirectX::PackedVector;
+#define LAND 0;
 
 const int gNumFrameResources = 3;
 
@@ -184,7 +185,6 @@ bool LandAndWavesApp::Initialize()
 	BuildLandGeometry();
 	BuildWavesGeometryBuffers();
 	BuildRenderItems();
-	//BuildRenderItems();
 	BuildFrameResources();
 	BuildPSOs();
 
@@ -229,7 +229,9 @@ void LandAndWavesApp::Update(const GameTimer& gt)
 
 	UpdateObjectCBs(gt);
 	UpdateMainPassCB(gt);
+	#if LAND
 	UpdateWaves(gt);
+	#endif
 }
 
 void LandAndWavesApp::Draw(const GameTimer& gt)
@@ -496,13 +498,15 @@ void LandAndWavesApp::BuildShadersAndInputLayout()
 	mInputLayout =
 	{
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 28, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
 	};
 }
 
 void LandAndWavesApp::BuildLandGeometry()
 {
 	GeometryGenerator geoGen;
+	#if LAND
 	GeometryGenerator::MeshData grid = geoGen.CreateGrid(160.0f, 160.0f, 50, 50);
 
 	//
@@ -510,7 +514,6 @@ void LandAndWavesApp::BuildLandGeometry()
 	// each vertex.  In addition, color the vertices based on their height so we have
 	// sandy looking beaches, grassy low hills, and snow mountain peaks.
 	//
-
 	std::vector<Vertex> vertices(grid.Vertices.size());
 	for (size_t i = 0; i < grid.Vertices.size(); ++i)
 	{
@@ -579,10 +582,56 @@ void LandAndWavesApp::BuildLandGeometry()
 	geo->DrawArgs["grid"] = submesh;
 
 	mGeometries["landGeo"] = std::move(geo);
+	#else
+	GeometryGenerator::MeshData skull = geoGen.ReadFile("Models/skull.txt");
+
+	auto vertices = std::vector<Vertex>(skull.Vertices.size());
+	auto indices = skull.GetIndices16();
+	for (int i = 0; i < vertices.size(); i++)
+	{
+		vertices[i].Pos = skull.Vertices[i].Position;
+		vertices[i].Normal = skull.Vertices[i].Normal;
+		vertices[i].Color = XMFLOAT4(Colors::LightPink);
+	}
+
+	const UINT vbByteSize = (UINT)(vertices.size() * sizeof(Vertex));
+	const UINT ibByteSize = (UINT)(indices.size() * sizeof(std::uint16_t));
+
+	auto geo = std::make_unique<MeshGeometry>();
+	geo->Name = "skull";
+	
+	ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->VertexBufferCPU));
+	CopyMemory(geo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
+
+	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
+	CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
+
+	geo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		mCommandList.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
+
+	geo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		mCommandList.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
+
+	geo->VertexBufferByteSize = vbByteSize;
+	geo->VertexByteStride = sizeof(Vertex);
+	geo->IndexBufferByteSize = ibByteSize;
+	geo->IndexFormat = DXGI_FORMAT_R16_UINT;
+	
+	SubmeshGeometry submesh;
+	submesh.IndexCount = (UINT)indices.size();
+	submesh.StartIndexLocation = 0;
+	submesh.BaseVertexLocation = 0;
+
+	geo->DrawArgs["skull"] = submesh;
+
+	mGeometries[geo->Name] = std::move(geo);
+
+	#endif
 }
 
 void LandAndWavesApp::BuildWavesGeometryBuffers()
 {
+	#if LAND
 	std::vector<std::uint16_t> indices(3 * mWaves->TriangleCount()); // 3 indices per face
 	assert(mWaves->VertexCount() < 0x0000ffff);
 
@@ -635,6 +684,7 @@ void LandAndWavesApp::BuildWavesGeometryBuffers()
 	geo->DrawArgs["grid"] = submesh;
 
 	mGeometries["waterGeo"] = std::move(geo);
+	#endif
 }
 
 void LandAndWavesApp::BuildPSOs()
@@ -686,6 +736,7 @@ void LandAndWavesApp::BuildFrameResources()
 
 void LandAndWavesApp::BuildRenderItems()
 {
+	#if LAND
 	auto wavesRitem = std::make_unique<RenderItem>();
 	wavesRitem->World = MathHelper::Identity4x4();
 	wavesRitem->ObjCBIndex = 0;
@@ -712,6 +763,20 @@ void LandAndWavesApp::BuildRenderItems()
 
 	mAllRitems.push_back(std::move(wavesRitem));
 	mAllRitems.push_back(std::move(gridRitem));
+
+	#else
+	auto skullRitem = std::make_unique<RenderItem>();
+	skullRitem->World = MathHelper::Identity4x4();
+	skullRitem->ObjCBIndex = 0;
+	skullRitem->Geo = mGeometries["skull"].get();
+	skullRitem->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	skullRitem->IndexCount = skullRitem->Geo->DrawArgs["skull"].IndexCount;
+	skullRitem->StartIndexLocation = skullRitem->Geo->DrawArgs["skull"].StartIndexLocation;
+	skullRitem->BaseVertexLocation = skullRitem->Geo->DrawArgs["skull"].BaseVertexLocation;
+	mAllRitems.push_back(move(skullRitem));
+	for (auto& e : mAllRitems)
+		mRitemLayer[(int)RenderLayer::Opaque].push_back(e.get());
+	#endif
 }
 
 void LandAndWavesApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems)
